@@ -1,25 +1,63 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { COURSES } from "@/data/courses";
 import { useStore } from "@/store/useStore";
 
-const fmt = (n) => n.toLocaleString("vi-VN") + "đ";
+const fmt = (n: number) => n.toLocaleString("vi-VN") + "đ";
 
 export default function Home() {
   const { user, wallet, bought, login, register, logout, topup, buyCourse } = useStore();
-  const [modal, setModal] = useState(null);
+  const [modal, setModal] = useState<string | null>(null);
   const [tab, setTab] = useState("login");
   const [form, setForm] = useState({ email: "", password: "", name: "" });
   const [msg, setMsg] = useState("");
   const [topupAmt, setTopupAmt] = useState(100000);
   const [pg, setPg] = useState("home");
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [lessonId, setLessonId] = useState(1);
   const [toast, setToast] = useState("");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
+  const [copied, setCopied] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const prevWalletRef = useRef(wallet);
 
-  const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 3000); };
+  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(""), 4000); };
+
+  const copyText = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  // ── Tự động kiểm tra số dư mỗi 3 giây khi modal topup mở ──
+  useEffect(() => {
+    if (modal !== "topup" || !user?.email) return;
+
+    prevWalletRef.current = wallet;
+    setChecking(true);
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/wallet?email=" + encodeURIComponent(user.email));
+        const data = await res.json();
+        const serverBalance = data.balance || 0;
+
+        if (serverBalance > prevWalletRef.current) {
+          const added = serverBalance - prevWalletRef.current;
+          topup(added);
+          prevWalletRef.current = serverBalance;
+          setModal(null);
+          setChecking(false);
+          showToast("🎉 Đã nhận " + fmt(added) + "! Số dư: " + fmt(serverBalance));
+        }
+      } catch (e) {
+        // Bỏ qua lỗi mạng
+      }
+    }, 3000);
+
+    return () => { clearInterval(interval); setChecking(false); };
+  }, [modal, user?.email]);
 
   const handleAuth = () => {
     if (tab === "login") {
@@ -35,7 +73,7 @@ export default function Home() {
     }
   };
 
-  const handleBuy = (id, price) => {
+  const handleBuy = (id: number, price: number) => {
     if (!user) { setModal("login"); return; }
     const err = buyCourse(id, price);
     if (err) { showToast(err); if (err.includes("ví")) setModal("topup"); return; }
@@ -47,6 +85,10 @@ export default function Home() {
     (category === "all" || c.category === category) &&
     c.title.toLowerCase().includes(search.toLowerCase())
   );
+
+  const qrUrl = "https://img.vietqr.io/image/VPB-6256816668-compact2.jpg?amount=" + topupAmt +
+    "&addInfo=" + encodeURIComponent("NAPTIEN " + (user?.email || "")) +
+    "&accountName=" + encodeURIComponent("DUONG VAN TUNG");
 
   return (
     <div style={{fontFamily:"'Segoe UI',sans-serif",background:"#f5f3ff",minHeight:"100vh"}}>
@@ -86,7 +128,7 @@ export default function Home() {
             <div style={{background:"rgba(255,255,255,.12)",borderRadius:"20px",padding:"20px",width:"300px",flexShrink:0,border:"1px solid rgba(255,255,255,.25)"}}>
               <div style={{color:"#fff",fontWeight:600,marginBottom:"12px",fontSize:"14px"}}>📊 Tổng quan</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
-                {[["Học viên mới","+1.248","#10b981"],["Hoàn thành","68.4%","#a78bfa"],["Đơn hàng","3.682","#fbbf24"],["Đánh giá","4.9/5","#ec4899"]].map(([label,val,color]) => (
+                {[["Học viên mới","+1.248"],["Hoàn thành","68.4%"],["Đơn hàng","3.682"],["Đánh giá","4.9/5"]].map(([label,val]) => (
                   <div key={label} style={{background:"rgba(255,255,255,.15)",borderRadius:"10px",padding:"12px"}}>
                     <div style={{color:"rgba(255,255,255,.7)",fontSize:"10px",marginBottom:"4px"}}>{label}</div>
                     <div style={{color:"#fff",fontSize:"18px",fontWeight:700}}>{val}</div>
@@ -204,15 +246,12 @@ export default function Home() {
               </div>
             )}
           </div>
-
           {course.comingSoon ? (
             <div style={{background:"#fff",borderRadius:"20px",padding:"40px",textAlign:"center",boxShadow:"0 4px 20px rgba(99,102,241,.08)"}}>
               <div style={{fontSize:"48px",marginBottom:"16px"}}>🕐</div>
               <h2 style={{fontSize:"20px",fontWeight:700,marginBottom:"8px",color:"#0f172a"}}>Khóa học đang được cập nhật</h2>
               <p style={{color:"#64748b",fontSize:"14px",marginBottom:"24px"}}>Chúng tôi đang hoàn thiện nội dung. Hãy đăng ký để nhận thông báo sớm nhất!</p>
-              <button onClick={() => { if(!user) setModal("login"); else showToast("Đã đăng ký nhận thông báo!"); }} style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",border:"none",padding:"12px 28px",borderRadius:"12px",cursor:"pointer",fontSize:"14px",fontWeight:600}}>
-                🔔 Thông báo khi có khóa học
-              </button>
+              <button onClick={() => { if(!user) setModal("login"); else showToast("Đã đăng ký nhận thông báo!"); }} style={{background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",border:"none",padding:"12px 28px",borderRadius:"12px",cursor:"pointer",fontSize:"14px",fontWeight:600}}>🔔 Thông báo khi có khóa học</button>
             </div>
           ) : (
             <>
@@ -242,9 +281,7 @@ export default function Home() {
                       <div style={{fontSize:"13px",color:"#94a3b8",marginBottom:"4px"}}>Chỉ với</div>
                       <div style={{fontSize:"32px",fontWeight:800,color:"#6366f1"}}>{fmt(course.price)}</div>
                     </div>
-                    <button onClick={() => handleBuy(course.id, course.price)} style={{width:"100%",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",border:"none",padding:"14px",borderRadius:"12px",cursor:"pointer",fontSize:"15px",fontWeight:700,marginBottom:"10px"}}>
-                      {user?"💳 Mua bằng ví":"Đăng nhập để mua"}
-                    </button>
+                    <button onClick={() => handleBuy(course.id, course.price)} style={{width:"100%",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",border:"none",padding:"14px",borderRadius:"12px",cursor:"pointer",fontSize:"15px",fontWeight:700,marginBottom:"10px"}}>{user?"💳 Mua bằng ví":"Đăng nhập để mua"}</button>
                     {user && wallet < course.price && <p style={{textAlign:"center",fontSize:"12px",color:"#ef4444"}}>Ví không đủ. <span style={{color:"#6366f1",cursor:"pointer"}} onClick={() => setModal("topup")}>Nạp tiền ngay</span></p>}
                   </>
                 )}
@@ -257,16 +294,20 @@ export default function Home() {
       {pg === "lesson" && course && (
         <div style={{maxWidth:"900px",margin:"0 auto",padding:"40px 24px"}}>
           <button onClick={() => setPg("detail")} style={{background:"none",border:"none",color:"#6366f1",cursor:"pointer",fontSize:"15px",marginBottom:"24px"}}>← Quay lại</button>
-          <div style={{background:"#0f172a",borderRadius:"20px",height:"320px",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:"20px"}}>
-            <div style={{textAlign:"center",color:"#fff"}}>
-              <div style={{fontSize:"48px",marginBottom:"12px"}}>{course.icon}</div>
-              <div style={{fontSize:"16px",fontWeight:600,marginBottom:"4px"}}>{course.lessons.find(l=>l.id===lessonId)?.title}</div>
-              <div style={{fontSize:"13px",opacity:.5}}>Bài {lessonId}/{course.lessons.length}</div>
+          <div style={{background:"#0f172a",borderRadius:"20px",overflow:"hidden",marginBottom:"20px"}}>
+            <div style={{position:"relative",paddingTop:"56.25%"}}>
+              <iframe
+                style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",border:"none"}}
+                src={"https://www.youtube.com/embed/" + (course.lessons.find(l=>l.id===lessonId)?.youtubeId || "") + "?rel=0&modestbranding=1"}
+                title={course.lessons.find(l=>l.id===lessonId)?.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
             </div>
           </div>
           <div style={{background:"#fff",borderRadius:"20px",padding:"24px",boxShadow:"0 4px 20px rgba(99,102,241,.08)"}}>
             <h2 style={{fontWeight:700,marginBottom:"8px"}}>{course.lessons.find(l=>l.id===lessonId)?.title}</h2>
-            <p style={{color:"#64748b",fontSize:"14px",marginBottom:"20px",lineHeight:"1.8"}}>Nội dung bài học sẽ hiển thị tại đây sau khi bạn upload video.</p>
+            <p style={{color:"#64748b",fontSize:"14px",marginBottom:"20px"}}>Bài {lessonId}/{course.lessons.length}</p>
             <div style={{display:"flex",gap:"10px"}}>
               {lessonId>1 && <button onClick={() => setLessonId(l=>l-1)} style={{border:"1.5px solid #e2e8f0",background:"#fff",padding:"10px 20px",borderRadius:"10px",cursor:"pointer",fontSize:"14px"}}>← Bài trước</button>}
               {lessonId<course.lessons.length
@@ -278,18 +319,66 @@ export default function Home() {
       )}
 
       {modal && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={() => setModal(null)}>
-          <div style={{background:"#fff",borderRadius:"24px",padding:"32px",width:"400px",maxWidth:"90vw"}} onClick={e=>e.stopPropagation()}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}} onClick={() => setModal(null)}>
+          <div style={{background:"#fff",borderRadius:"24px",padding:"28px",width:"420px",maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
             {modal==="topup" ? (
               <>
-                <h2 style={{fontWeight:700,fontSize:"18px",marginBottom:"6px"}}>💰 Nạp tiền vào ví</h2>
-                <p style={{color:"#94a3b8",fontSize:"13px",marginBottom:"20px"}}>Chọn số tiền bạn muốn nạp</p>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px"}}>
+                  <h2 style={{fontWeight:700,fontSize:"18px",margin:0}}>💳 Nạp tiền vào ví</h2>
+                  <span style={{fontSize:"13px",color:"#94a3b8"}}>Số dư: <b style={{color:"#6366f1"}}>{fmt(wallet)}</b></span>
+                </div>
+
+                {checking && (
+                  <div style={{background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:"10px",padding:"10px 14px",marginBottom:"14px",display:"flex",alignItems:"center",gap:"8px"}}>
+                    <span style={{fontSize:"16px"}}>⏳</span>
+                    <span style={{fontSize:"13px",color:"#16a34a",fontWeight:600}}>Đang chờ xác nhận chuyển khoản...</span>
+                  </div>
+                )}
+
+                <p style={{color:"#94a3b8",fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"8px"}}>Chọn số tiền nạp</p>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px",marginBottom:"16px"}}>
                   {[50000,100000,200000,300000,500000,1000000].map(a => (
                     <button key={a} onClick={() => setTopupAmt(a)} style={{padding:"10px",border:"1.5px solid "+(topupAmt===a?"#6366f1":"#e2e8f0"),borderRadius:"10px",background:topupAmt===a?"#f5f3ff":"#fff",color:topupAmt===a?"#6366f1":"#374151",cursor:"pointer",fontSize:"12px",fontWeight:600}}>{fmt(a)}</button>
                   ))}
                 </div>
-                <button onClick={() => { topup(topupAmt); setModal(null); showToast("Nạp tiền thành công!"); }} style={{width:"100%",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",border:"none",padding:"13px",borderRadius:"12px",cursor:"pointer",fontSize:"14px",fontWeight:700}}>Nạp {fmt(topupAmt)} vào ví</button>
+
+                <div style={{textAlign:"center",marginBottom:"16px"}}>
+                  <p style={{fontSize:"11px",color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"8px"}}>Quét QR chuyển khoản</p>
+                  <div style={{display:"inline-block",border:"4px solid #f5f3ff",borderRadius:"14px",overflow:"hidden",boxShadow:"0 4px 20px rgba(99,102,241,.12)"}}>
+                    <img src={qrUrl} alt="QR chuyen khoan" style={{width:"190px",height:"190px",display:"block"}}/>
+                  </div>
+                  <p style={{fontSize:"11px",color:"#94a3b8",marginTop:"6px"}}>Hỗ trợ tất cả app ngân hàng</p>
+                </div>
+
+                <div style={{background:"#f8fafc",borderRadius:"12px",padding:"14px",marginBottom:"12px",border:"1.5px solid #e2e8f0"}}>
+                  <p style={{fontSize:"11px",color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"10px"}}>📋 Thông tin chuyển khoản</p>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:"7px"}}>
+                    <span style={{fontSize:"13px",color:"#64748b"}}>Ngân hàng</span>
+                    <span style={{fontSize:"13px",fontWeight:700}}>VP Bank</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"7px"}}>
+                    <span style={{fontSize:"13px",color:"#64748b"}}>Số tài khoản</span>
+                    <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
+                      <span style={{fontSize:"13px",fontWeight:700}}>6256816668</span>
+                      <button onClick={() => copyText("6256816668","acc")} style={{fontSize:"11px",color:"#6366f1",border:"1px solid #c7d2fe",background:"#f5f3ff",cursor:"pointer",padding:"2px 8px",borderRadius:"4px",fontWeight:600}}>{copied==="acc"?"✓":"Copy"}</button>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:"10px"}}>
+                    <span style={{fontSize:"13px",color:"#64748b"}}>Chủ tài khoản</span>
+                    <span style={{fontSize:"13px",fontWeight:700}}>DUONG VAN TUNG</span>
+                  </div>
+                  <div style={{background:"#fef3c7",border:"2px solid #fbbf24",borderRadius:"8px",padding:"10px"}}>
+                    <p style={{fontSize:"11px",color:"#92400e",fontWeight:700,marginBottom:"6px"}}>📝 NỘI DUNG CK (BẮT BUỘC)</p>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px"}}>
+                      <code style={{fontSize:"12px",fontWeight:800,color:"#92400e",letterSpacing:"0.5px",wordBreak:"break-all"}}>NAPTIEN {user?.email}</code>
+                      <button onClick={() => copyText("NAPTIEN "+(user?.email||""),"content")} style={{flexShrink:0,fontSize:"11px",background:"#fbbf24",border:"none",borderRadius:"6px",padding:"4px 10px",cursor:"pointer",fontWeight:700,color:"#78350f"}}>{copied==="content"?"✓":"Copy"}</button>
+                    </div>
+                  </div>
+                  <p style={{fontSize:"11px",color:"#ef4444",marginTop:"6px"}}>⚠️ Ghi sai nội dung → không tự động cộng tiền!</p>
+                </div>
+
+                <p style={{fontSize:"11px",color:"#94a3b8",textAlign:"center",marginBottom:"12px"}}>⚡ Tiền cộng tự động 1–2 phút sau khi chuyển thành công</p>
+                <button onClick={() => setModal(null)} style={{width:"100%",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",border:"none",padding:"13px",borderRadius:"12px",cursor:"pointer",fontSize:"14px",fontWeight:700}}>Đóng</button>
               </>
             ) : (
               <>
@@ -309,7 +398,7 @@ export default function Home() {
         </div>
       )}
 
-      {toast && <div style={{position:"fixed",bottom:"20px",right:"20px",background:"#0f172a",color:"#fff",padding:"12px 20px",borderRadius:"12px",fontSize:"13px",zIndex:300,fontWeight:500}}>{toast}</div>}
+      {toast && <div style={{position:"fixed",bottom:"20px",right:"20px",background:"#0f172a",color:"#fff",padding:"12px 20px",borderRadius:"12px",fontSize:"13px",zIndex:300,fontWeight:500,maxWidth:"300px"}}>{toast}</div>}
     </div>
   );
 }
